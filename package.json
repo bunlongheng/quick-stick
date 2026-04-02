@@ -1,0 +1,23 @@
+{
+  "name": "quick-stick",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 4445",
+    "build": "next build",
+    "start": "next start -p 4445"
+  },
+  "dependencies": {
+    "next": "^16.1.6",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "typescript": "^5",
+    "tailwindcss": "^3.4.19",
+    "postcss": "^8",
+    "autoprefixer": "^10"
+  }
+}
