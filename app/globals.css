@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* The sticky's scrollbar is ink, not chrome. Each cell sits under
+   filter: brightness(0.7), so a translucent black thumb darkens along
+   with the cell and reads as a deeper shade of its own color.
+   Chrome/Firefox take the standard properties; they switch off the
+   ::-webkit rules below, which are left for Safari. */
+.sticky-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.26) transparent;
+}
+
+.sticky-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.sticky-scroll::-webkit-scrollbar-track,
+.sticky-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.sticky-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.26);
+  border-radius: 999px;
+  /* Transparent border + padding-box clip insets the thumb, so it floats
+     in the color instead of sitting on a rail. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}

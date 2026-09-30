@@ -7,6 +7,7 @@ const PALETTE = [
   '#4DD9D2','#6CC4F0','#5EA3FF','#8B89E8','#C47EEA','#FF6B8A',
 ]
 
+const LS_KEY = 'quick-stick'
 const GRID_OPTIONS = [6, 9, 12] as const
 type Sticky = { title: string; content: string; color: string }
 
@@ -18,10 +19,43 @@ function makeGrid(count: number): Sticky[] {
   }))
 }
 
+function loadFromStorage(): { count: 6 | 9 | 12; stickies: Sticky[] } | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (data?.stickies?.length) return data
+  } catch {}
+  return null
+}
+
+function saveToStorage(count: number, stickies: Sticky[]) {
+  localStorage.setItem(LS_KEY, JSON.stringify({ count, stickies }))
+}
+
 export default function QuickCreate() {
   const [count, setCount] = useState<6 | 9 | 12>(9)
   const [stickies, setStickies] = useState<Sticky[]>(makeGrid(9))
+  const [loaded, setLoaded] = useState(false)
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [message, setMessage] = useState('')
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    const saved = loadFromStorage()
+    if (saved) {
+      setCount(saved.count as 6 | 9 | 12)
+      setStickies(saved.stickies)
+    }
+    setLoaded(true)
+  }, [])
+
+  // Write through on every keystroke. A debounce here only bought a window
+  // in which a reload or crash lost what was typed.
+  useEffect(() => {
+    if (!loaded) return
+    saveToStorage(count, stickies)
+  }, [stickies, count, loaded])
 
   const changeGrid = useCallback((n: 6 | 9 | 12) => {
     setCount(n)
@@ -35,43 +69,65 @@ export default function QuickCreate() {
     setStickies(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s))
   }, [])
 
-  const save = useCallback(async () => {
-    const filled = stickies.filter(s => s.title.trim() || s.content.trim())
-    if (!filled.length) return
-
-    setStatus('saving')
-    try {
-      const batch = filled.map(s => ({
-        type: 'note' as const,
-        name: s.title.trim() || 'Untitled',
-        content: s.content.trim() || s.title.trim(),
-        folder: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+  // Send every filled cell to Stickies in one batch, then clear the grid.
+  const send = useCallback(async () => {
+    const notes = stickies
+      .map(s => ({ title: s.title.trim(), content: s.content.trim(), color: s.color }))
+      .filter(s => s.title || s.content)
+      .map(s => ({
+        type: 'note',
+        title: s.title || s.content.split('\n')[0].slice(0, 60),
+        content: s.content || s.title,
         color: s.color,
       }))
+
+    if (notes.length === 0) {
+      setStatus('error')
+      setMessage('nothing to save')
+      return
+    }
+
+    setStatus('saving')
+    setMessage('')
+    try {
       const res = await fetch('/api/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batch }),
+        body: JSON.stringify({ notes }),
       })
-      if (!res.ok) { const t = await res.text(); console.error('Save failed:', res.status, t); throw new Error(t || `HTTP ${res.status}`) }
-      setStatus('saved')
-      setTimeout(() => {
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || `save failed (${res.status})`)
+
+      const failed = Array.isArray(data?.results)
+        ? data.results.filter((r: { error?: string }) => r?.error).length
+        : 0
+      setStatus(failed ? 'error' : 'saved')
+      setMessage(failed ? `${notes.length - failed}/${notes.length} saved` : `${notes.length} saved`)
+      if (!failed) {
         setStickies(makeGrid(count))
-        setStatus('idle')
-      }, 1500)
-    } catch {
+        localStorage.removeItem(LS_KEY)
+      }
+    } catch (err) {
       setStatus('error')
-      setTimeout(() => setStatus('idle'), 2000)
+      setMessage(err instanceof Error ? err.message : 'save failed')
     }
   }, [stickies, count])
 
+  // Cmd/Ctrl+Enter saves from anywhere in the grid.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); save() }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [save])
+  }, [send])
+
+  // Clear the status line a moment after it lands.
+  useEffect(() => {
+    if (status !== 'saved' && status !== 'error') return
+    const t = setTimeout(() => { setStatus('idle'); setMessage('') }, 2500)
+    return () => clearTimeout(t)
+  }, [status])
 
   const cols = count === 6 ? 3 : count === 9 ? 3 : 4
   const rows = Math.ceil(count / cols)
@@ -94,14 +150,14 @@ export default function QuickCreate() {
               value={s.title}
               onChange={e => update(i, 'title', e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget.nextElementSibling as HTMLTextAreaElement)?.focus() } }}
-              className="bg-transparent border-none outline-none text-sm sm:text-base font-semibold w-full"
+              className="bg-transparent border-none outline-none text-base sm:text-lg font-semibold w-full"
               style={{ color: '#000' }}
             />
             <textarea
               placeholder=""
               value={s.content}
               onChange={e => update(i, 'content', e.target.value)}
-              className="bg-transparent border-none outline-none text-xs sm:text-sm flex-1 w-full resize-none"
+              className="sticky-scroll bg-transparent border-none outline-none text-base leading-relaxed flex-1 w-full resize-none"
               style={{ color: '#000' }}
             />
           </div>
@@ -122,10 +178,22 @@ export default function QuickCreate() {
             </button>
           ))}
         </div>
-        {status === 'saved' && <span className="text-green-400 text-xs">Saved</span>}
-        {status === 'error' && <span className="text-red-400 text-xs">Failed</span>}
-        {status === 'saving' && <span className="text-white/40 text-xs">Saving...</span>}
-        <span className="text-white/20 text-[10px]"><kbd className="px-1 py-0.5 bg-white/10 rounded">Cmd+Enter</kbd></span>
+
+        <div className="w-px h-4 bg-white/20" />
+
+        <button
+          onClick={send}
+          disabled={status === 'saving'}
+          className="px-3 py-0.5 text-xs rounded-full text-white/70 hover:text-white hover:bg-white/10 disabled:opacity-40 transition-colors"
+        >
+          {status === 'saving' ? 'saving' : 'save'}
+        </button>
+
+        {message && (
+          <span className={`text-xs ${status === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+            {message}
+          </span>
+        )}
       </div>
     </div>
   )
