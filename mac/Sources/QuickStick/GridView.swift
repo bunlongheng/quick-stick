@@ -73,9 +73,11 @@ struct GridView: View {
         }
         .animation(.easeOut(duration: 0.14), value: dragFrom)
         .animation(.easeOut(duration: 0.14), value: dragOver)
-        // A press inside the cell you are already editing is left alone, so
-        // selecting text still works; anywhere else picks the sticky up.
-        .gesture(dragGesture(i, size: size), isEnabled: !focused)
+        // The padding and the title pick the sticky up whether or not the
+        // cell is being edited, as on the web. A press inside the body is
+        // handled by the text view itself: selection while editing, a drag
+        // otherwise, and AppKit's tracking loop keeps either from reaching here.
+        .gesture(dragGesture(i, size: size))
     }
 
     /// The same move, driven from inside a cell's body rather than from its
