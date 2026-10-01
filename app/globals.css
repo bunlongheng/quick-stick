@@ -2,11 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The sticky's scrollbar is ink, not chrome. Each cell sits under
-   filter: brightness(0.7), so a translucent black thumb darkens along
-   with the cell and reads as a deeper shade of its own color.
-   Chrome/Firefox take the standard properties; they switch off the
-   ::-webkit rules below, which are left for Safari. */
+/* ── The sticky ─────────────────────────────────────────────────────────
+   A cell is a flat block of colour with no chrome, so the only thing that
+   can announce "title here, body below" is the type itself. The title is
+   set in the dot-matrix display face and ruled off with a hairline; the
+   rule is drawn even on an empty cell, which is what makes both fields
+   findable before a single character is typed. */
+
+.sticky-title {
+  font-family: var(--qs-display), ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.sticky-body {
+  font-family: var(--qs-body), ui-sans-serif, system-ui, sans-serif;
+  /* 16px floor: iOS zooms the page on any field below it. */
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+/* The rule under the title. Faint at rest, ink-dark once the field has
+   focus, so the cell shows you which half you are typing into. An empty
+   cell drops it almost to nothing - a hint that the structure is there,
+   not a line to read. */
+.sticky-rule {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
+  transition: border-color 160ms ease;
+}
+
+.sticky-rule.is-blank {
+  border-bottom-color: rgba(0, 0, 0, 0.05);
+}
+
+.sticky-rule:focus-within,
+.sticky-rule.is-blank:focus-within {
+  border-bottom-color: rgba(0, 0, 0, 0.55);
+}
+
+.sticky-title::placeholder,
+.sticky-body::placeholder {
+  color: rgba(0, 0, 0, 0.32);
+}
+
+/* ── The scrollbar ──────────────────────────────────────────────────────
+   Ink, not chrome. Each cell sits under filter: brightness(0.7), so a
+   translucent black thumb darkens along with the cell and reads as a
+   deeper shade of its own colour. Chrome and Firefox take the standard
+   properties, which switch off the ::-webkit rules left for Safari. */
+
 .sticky-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.26) transparent;
@@ -26,7 +73,178 @@
   background-color: rgba(0, 0, 0, 0.26);
   border-radius: 999px;
   /* Transparent border + padding-box clip insets the thumb, so it floats
-     in the color instead of sitting on a rail. */
+     in the colour instead of sitting on a rail. */
   border: 2px solid transparent;
   background-clip: padding-box;
+}
+
+/* ── Moving a sticky ────────────────────────────────────────────────────
+   No handle and no icon: the cell you lift goes translucent, and the one
+   you are over is ruled with an inset line in the same ink as everything
+   else. Nothing is added to the page that is not already there. */
+
+.sticky-cell {
+  transition: opacity 140ms ease, box-shadow 140ms ease;
+}
+
+.sticky-cell.is-dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.sticky-cell.is-target {
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.45);
+}
+
+/* ── The corner disc ───────────────────────────────────────────────────
+   The only control on the board. Drawn as a hairline ring in the same
+   ink as the rules inside the cells, so it reads as part of whatever
+   colour happens to be behind it rather than as a button dropped on
+   top. It darkens on hover and fills once the panel is out. */
+
+.qs-cog {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  background: transparent;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.qs-cog::before {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 4px;
+  margin: auto;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  transition: background-color 160ms ease;
+}
+
+.qs-cog:hover {
+  border-color: rgba(0, 0, 0, 0.5);
+}
+
+.qs-cog:hover::before {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.qs-cog.is-open {
+  border-color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.qs-cog.is-open::before {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* Sync state, next to the cog. Nothing when synced - a dim dot while a
+   save is in flight, red when the last save or load failed. */
+.qs-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.qs-status-dot.is-offline {
+  background: #e23b3b;
+}
+
+/* Out from under the disc, not dropped in from nowhere. */
+.qs-panel {
+  animation: qs-panel-in 160ms ease both;
+  transform-origin: right center;
+}
+
+@keyframes qs-panel-in {
+  from { opacity: 0; transform: translateX(6px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 12 on screen is 4 across. The cells are narrow enough that the display
+   face and body step down a size, so a line still holds a few words. */
+.is-dense .sticky-title {
+  font-size: 15px;
+}
+
+.is-dense .sticky-body {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* The page itself never scrolls. Pinning the body to the visual viewport is
+   what stops iPad Safari from rubber-banding the whole board or sliding it
+   up under the keyboard; the only thing that scrolls is a sticky's body,
+   and a scroll that reaches its end stops there instead of taking the page. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  /* Whatever the viewport does not cover shows the canvas, and the canvas
+     is black like the app icon, never a white strip. */
+  background: #000;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* iPad Safari keeps the layout viewport taller than what is on screen while
+   the keyboard is up or the toolbar is moving. The board follows the visual
+   viewport, which the page measures and writes into --vvh. */
+.qs-board {
+  height: 100%;
+  height: var(--vvh, 100%);
+  touch-action: pan-y;
+}
+
+.sticky-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mirror and textarea share every metric, so the painted line sits exactly
+   under the invisible one the caret moves through. */
+.sticky-body {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  padding: 0;
+  margin: 0;
+}
+
+.sticky-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #000;
+  pointer-events: none;
+}
+
+.sticky-mirror .is-done {
+  text-decoration: line-through;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.sticky-ink {
+  color: transparent;
+  caret-color: #000;
+}
+
+/* Selection in the same ink as everything else. The system blue fights
+   every one of the 12 colours; a wash of black sits in all of them. */
+.sticky-title::selection,
+.sticky-ink::selection {
+  background: rgba(0, 0, 0, 0.22);
+  color: transparent;
+}
+
+.sticky-title::selection {
+  color: #000;
 }

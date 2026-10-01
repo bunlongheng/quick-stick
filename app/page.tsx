@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { isDone, normalizeDone, toggleDone } from '@/lib/done'
 
 const PALETTE = [
   '#FF6B6B','#FF8F6B','#FFB84D','#FFE066','#E8EF7B','#6DDC8C',
@@ -9,6 +10,9 @@ const PALETTE = [
 
 const LS_KEY = 'quick-stick'
 const GRID_OPTIONS = [6, 9, 12] as const
+// The grid size is a choice, not a draft. A device that never picked one
+// shows the whole board.
+const GRID_KEY = 'quick-stick-grid'
 const MAX = 12
 type Sticky = { title: string; content: string; color: string }
 
@@ -34,7 +38,7 @@ function gridFromCells(cells: RemoteCell[]): Sticky[] {
   const grid = makeGrid()
   for (const c of cells) {
     if (c.slot >= 0 && c.slot < MAX) {
-      grid[c.slot] = { title: c.title, content: c.content, color: c.color }
+      grid[c.slot] = { title: c.title, content: normalizeDone(c.content), color: c.color }
     }
   }
   return grid
@@ -45,7 +49,10 @@ function loadFromStorage(): { count: 6 | 9 | 12; stickies: Sticky[] } | null {
     const raw = localStorage.getItem(LS_KEY)
     if (!raw) return null
     const data = JSON.parse(raw)
-    if (data?.stickies?.length) return data
+    const picked = Number(localStorage.getItem(GRID_KEY))
+    if (data?.stickies?.length) {
+      return { ...data, count: GRID_OPTIONS.includes(picked as 6 | 9 | 12) ? picked : 12 }
+    }
   } catch {}
   return null
 }
@@ -55,13 +62,14 @@ function saveToStorage(count: number, stickies: Sticky[]) {
 }
 
 export default function QuickCreate() {
-  const [count, setCount] = useState<6 | 9 | 12>(9)
+  const [count, setCount] = useState<6 | 9 | 12>(12)
   const [stickies, setStickies] = useState<Sticky[]>(makeGrid())
   const [loaded, setLoaded] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [offline, setOffline] = useState(false)
   const bodyRefs = useRef<(HTMLTextAreaElement | null)[]>([])
+  const mirrorRefs = useRef<(HTMLDivElement | null)[]>([])
 
   // Load from localStorage on mount. An empty board is fine if there is no draft yet.
   useEffect(() => {
@@ -71,6 +79,25 @@ export default function QuickCreate() {
       setStickies(padGrid(saved.stickies))
     }
     setLoaded(true)
+  }, [])
+
+  // iPad Safari shrinks the visual viewport under the keyboard without
+  // shrinking the page. Size the board to what is actually visible, and
+  // keep the page pinned at the top so nothing slides under the keyboard.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const fit = () => {
+      document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`)
+      if (window.scrollY !== 0) window.scrollTo(0, 0)
+    }
+    fit()
+    vv.addEventListener('resize', fit)
+    vv.addEventListener('scroll', fit)
+    return () => {
+      vv.removeEventListener('resize', fit)
+      vv.removeEventListener('scroll', fit)
+    }
   }, [])
 
   // Write through on every keystroke. A debounce here only bought a window
@@ -183,7 +210,10 @@ export default function QuickCreate() {
 
   // Only changes how many cells are on screen. Anything typed into a cell
   // that scrolls out of view stays in state and comes back with it.
-  const changeGrid = useCallback((n: 6 | 9 | 12) => setCount(n), [])
+  const changeGrid = useCallback((n: 6 | 9 | 12) => {
+    setCount(n)
+    localStorage.setItem(GRID_KEY, String(n))
+  }, [])
 
   const update = useCallback((i: number, field: 'title' | 'content', value: string) => {
     setStickies(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s))
@@ -267,9 +297,9 @@ export default function QuickCreate() {
   const rows = Math.ceil(count / cols)
 
   return (
-    <div className={`h-screen w-screen overflow-hidden relative ${dragFrom !== null ? 'select-none' : ''}`}>
+    <div className={`qs-board h-full w-full overflow-hidden relative ${dragFrom !== null ? 'select-none' : ''}`}>
       <div
-        className="w-full h-full"
+        className={`w-full h-full ${count === 12 ? 'is-dense' : ''}`}
         style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
       >
         {stickies.slice(0, count).map((s, i) => (
@@ -293,14 +323,31 @@ export default function QuickCreate() {
                 style={{ color: '#000' }}
               />
             </div>
-            <textarea
-              ref={el => { bodyRefs.current[i] = el }}
-              aria-label={`Body, note ${i + 1}`}
-              value={s.content}
-              onChange={e => update(i, 'content', e.target.value)}
-              className="sticky-body sticky-scroll bg-transparent border-none outline-none flex-1 w-full resize-none"
-              style={{ color: '#000' }}
-            />
+            {/* A textarea cannot strike a line, so the ink is painted by a
+                mirror behind it and the textarea keeps only the caret. */}
+            <div className="relative flex-1 min-h-0">
+              <div aria-hidden className="sticky-body sticky-mirror" ref={el => { mirrorRefs.current[i] = el }}>
+                {s.content.split('\n').map((line, n) => (
+                  <span key={n} className={isDone(line) ? 'is-done' : undefined}>{line}{'\n'}</span>
+                ))}
+              </div>
+              <textarea
+                ref={el => { bodyRefs.current[i] = el }}
+                aria-label={`Body, note ${i + 1}`}
+                value={s.content}
+                onChange={e => update(i, 'content', e.target.value)}
+                onKeyDown={e => {
+                  if (e.key.toLowerCase() !== 'd' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
+                  e.preventDefault()
+                  const el = e.currentTarget
+                  const r = toggleDone(el.value, el.selectionStart, el.selectionEnd)
+                  update(i, 'content', r.text)
+                  requestAnimationFrame(() => el.setSelectionRange(r.caret, r.caret))
+                }}
+                onScroll={e => { const m = mirrorRefs.current[i]; if (m) m.scrollTop = e.currentTarget.scrollTop }}
+                className="sticky-body sticky-scroll sticky-ink bg-transparent border-none outline-none absolute inset-0 w-full h-full resize-none"
+              />
+            </div>
           </div>
         ))}
       </div>

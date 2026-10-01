@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import { boardBus } from '@/lib/boardBus'
+import { normalizeDone } from '@/lib/done'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,6 +46,7 @@ export async function PUT(req: Request) {
   const values: unknown[] = []
   const tuples = rows.map((c, i) => {
     const n = i * 4
+    c.content = normalizeDone(c.content)
     values.push(c.slot, c.title, c.content, c.color)
     return `($${n + 1}, $${n + 2}, $${n + 3}, $${n + 4})`
   })
