@@ -4,3 +4,8 @@ node_modules
 
 # Local build artifacts
 tsconfig.tsbuildinfo
+
+# Mac app build output
+mac/.build
+mac/*.app
+mac/QuickStick
